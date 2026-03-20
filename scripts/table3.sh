@@ -1,1 +1,0 @@
-python experiments/render_table3_representation.py
