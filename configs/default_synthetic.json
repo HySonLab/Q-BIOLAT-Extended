@@ -1,0 +1,22 @@
+{
+  "dataset": {
+    "out": "examples/synthetic_peptides.npz",
+    "N": 300,
+    "M": 16,
+    "peptide_length": 12,
+    "noise_std": 0.1,
+    "interaction_scale": 0.2,
+    "sparse_interactions": false,
+    "interaction_keep_prob": 0.25,
+    "seed": 0
+  },
+  "training": {
+    "seed": 42,
+    "qubo_l2": 0.001
+  },
+  "optimization": {
+    "sa_steps": 20000,
+    "random_samples": 10000,
+    "ga_generations": 150
+  }
+}
