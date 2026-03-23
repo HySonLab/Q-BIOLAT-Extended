@@ -1,0 +1,31 @@
+Step 1: Run scripts/run_gfp_pipeline.sh to create ESM embeddings and binary projection
+
+Step 2: Run scripts/run_gfp_pca_pipeline.sh to create PCA projection
+
+Step 3: Run scripts/analyze_all_pca_landscape.sh and scripts/analyze_all_random_landscape.sh
+
+Step 4: Run scripts/group_landscape_results.sh
+
+Step 5: Run scripts/plot_landscape_diagnostics.sh
+
+Step 6: 
+- Run scripts/run_multiseed_grid.sh
+- Run scripts/aggregate_optimization_results.sh
+- Run scripts/group_optimization_results.sh
+
+Step 7:
+- Run scripts/run_multiseed_grid_pca.sh
+- Run scripts/aggregate_optimization_results.sh
+- Run scripts/group_optimization_results.sh
+
+Step 8: Run scripts/merge_landscape_optimization.sh
+
+Step 9: Run scripts/plot_final_figures.sh
+
+-----------------
+
+Oracle training and evaluation:
+- Run scrips/train_oracle_grid.sh
+- Run scripts/aggregate_oracle_results.sh
+- Run scripts/group_oracle_results.sh
+

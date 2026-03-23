@@ -1,15 +1,11 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+set -e
 
-DATA_PATH=${1:-data/gfp_latent_pca_16.npz}
-OUT_DIR=${2:-artifacts/landscape}
-SEED=${3:-42}
-
-mkdir -p "${OUT_DIR}"
+mkdir -p artifacts/landscape
 
 python experiments/analyze_qubo_landscape.py \
-  --data "${DATA_PATH}" \
-  --seed "${SEED}" \
+  --data artifacts/binary_pca/gfp_1000_pca_binary_16.npz \
+  --seed 42 \
   --l2 1e-3 \
   --n-samples 512 \
-  --out "${OUT_DIR}/landscape_seed_${SEED}.json"
+  --out artifacts/landscape/gfp_1000_pca_binary_16_seed_42.json

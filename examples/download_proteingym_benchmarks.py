@@ -15,7 +15,7 @@ ZIP_URL = "https://marks.hms.harvard.edu/proteingym/ProteinGym_v1.3/DMS_ProteinG
 DEFAULT_BENCHMARKS = {
     "gfp": ["gfp", "sarkisyan"],
     "gb1": ["olson"],
-    "aav": ["aav", "matreyek"],
+    "aav": ["aav", "sinai", "capsd", "capsd_aav2s"]
 }
 
 
