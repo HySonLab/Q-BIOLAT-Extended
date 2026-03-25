@@ -22,7 +22,6 @@ def set_seed(seed):
 def load_latent_npz(path):
     data = np.load(path, allow_pickle=True)
 
-    # Support several possible latent keys
     if "X" in data:
         Z = data["X"]
     elif "z_cont" in data:
@@ -87,8 +86,8 @@ class Decoder(nn.Module):
 
     def forward(self, z):
         h = self.shared(z)
-        mask_logits = self.mask(h)                     # [B, L]
-        aa_logits = self.aa(h).view(-1, self.seq_len, 20)  # [B, L, 20]
+        mask_logits = self.mask(h)
+        aa_logits = self.aa(h).view(-1, self.seq_len, 20)
         return mask_logits, aa_logits
 
 
@@ -122,6 +121,57 @@ def compute_metrics(mask_true, aa_true, mask_logits, aa_logits):
     }
 
 
+def evaluate(model, Z, mut, aa, batch_size, device):
+    model.eval()
+
+    all_mask_true = []
+    all_aa_true = []
+    all_mask_logits = []
+    all_aa_logits = []
+
+    total_loss = 0.0
+    total_batches = 0
+
+    pos = mut.sum()
+    neg = mut.size - pos
+    pos_weight = torch.tensor(neg / max(pos, 1), dtype=torch.float32, device=device)
+
+    with torch.no_grad():
+        for i in range(0, len(Z), batch_size):
+            z = torch.from_numpy(Z[i:i + batch_size]).to(device)
+            m = torch.from_numpy(mut[i:i + batch_size]).to(device)
+            a = torch.from_numpy(aa[i:i + batch_size]).to(device)
+
+            mask_logits, aa_logits = model(z)
+
+            mask_loss = F.binary_cross_entropy_with_logits(
+                mask_logits, m, pos_weight=pos_weight
+            )
+            aa_loss = F.cross_entropy(
+                aa_logits.reshape(-1, 20),
+                a.reshape(-1),
+                ignore_index=-100,
+            )
+            loss = 2.0 * mask_loss + aa_loss
+
+            total_loss += float(loss.item())
+            total_batches += 1
+
+            all_mask_true.append(m.cpu())
+            all_aa_true.append(a.cpu())
+            all_mask_logits.append(mask_logits.cpu())
+            all_aa_logits.append(aa_logits.cpu())
+
+    all_mask_true = torch.cat(all_mask_true, dim=0)
+    all_aa_true = torch.cat(all_aa_true, dim=0)
+    all_mask_logits = torch.cat(all_mask_logits, dim=0)
+    all_aa_logits = torch.cat(all_aa_logits, dim=0)
+
+    metrics = compute_metrics(all_mask_true, all_aa_true, all_mask_logits, all_aa_logits)
+    metrics["loss"] = total_loss / max(total_batches, 1)
+    return metrics
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--latent-npz", required=True)
@@ -132,9 +182,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--hidden-dim", type=int, default=256)
-    parser.add_argument("--mask-loss-weight", type=float, default=2.0)
-    parser.add_argument("--aa-loss-weight", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--device", type=str, default="cpu")
 
     args = parser.parse_args()
 
@@ -151,15 +200,17 @@ def main():
     mut_train, aa_train = build_targets(seq_train, wt)
     mut_test, aa_test = build_targets(seq_test, wt)
 
-    device = "cpu"
+    device = args.device
     model = Decoder(args.latent_dim, len(wt), hidden=args.hidden_dim).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     pos = mut_train.sum()
     neg = mut_train.size - pos
-    pos_weight = torch.tensor(neg / max(pos, 1), dtype=torch.float32)
+    pos_weight = torch.tensor(neg / max(pos, 1), dtype=torch.float32, device=device)
 
     history = []
+    best_f1 = -1.0
+    best_state = None
 
     for epoch in range(args.epochs):
         model.train()
@@ -177,70 +228,82 @@ def main():
             mask_loss = F.binary_cross_entropy_with_logits(
                 mask_logits, m, pos_weight=pos_weight
             )
-
             aa_loss = F.cross_entropy(
                 aa_logits.reshape(-1, 20),
                 a.reshape(-1),
                 ignore_index=-100,
             )
 
-            loss = args.mask_loss_weight * mask_loss + args.aa_loss_weight * aa_loss
+            loss = 2.0 * mask_loss + aa_loss
 
             opt.zero_grad()
             loss.backward()
             opt.step()
 
         if epoch % 10 == 0 or epoch == args.epochs - 1:
-            model.eval()
-            with torch.no_grad():
-                z = torch.from_numpy(Z_test).to(device)
-                m = torch.from_numpy(mut_test).to(device)
-                a = torch.from_numpy(aa_test).to(device)
-
-                mask_logits, aa_logits = model(z)
-                metrics = compute_metrics(m, a, mask_logits, aa_logits)
-
+            metrics = evaluate(model, Z_test, mut_test, aa_test, args.batch_size, device)
             history.append({
                 "epoch": epoch,
-                "loss": float(loss.item()),
-                "precision": metrics["precision"],
-                "recall": metrics["recall"],
-                "f1": metrics["f1"],
-                "aa_acc": metrics["aa_acc"],
-                "pos_acc": metrics["pos_acc"],
+                **metrics,
             })
 
             print(
-                f"epoch {epoch}, loss {loss.item():.4f}, "
-                f"f1 {metrics['f1']:.4f}, aa_acc {metrics['aa_acc']:.4f}, "
+                f"epoch {epoch}, loss {metrics['loss']:.4f}, "
+                f"precision {metrics['precision']:.4f}, "
+                f"recall {metrics['recall']:.4f}, "
+                f"f1 {metrics['f1']:.4f}, "
+                f"aa_acc {metrics['aa_acc']:.4f}, "
                 f"pos_acc {metrics['pos_acc']:.4f}"
             )
 
-    model.eval()
-    with torch.no_grad():
-        z = torch.from_numpy(Z_test).to(device)
-        m = torch.from_numpy(mut_test).to(device)
-        a = torch.from_numpy(aa_test).to(device)
+            if metrics["f1"] > best_f1:
+                best_f1 = metrics["f1"]
+                best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
-        mask_logits, aa_logits = model(z)
-        metrics = compute_metrics(m, a, mask_logits, aa_logits)
+    if best_state is None:
+        best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+    model.load_state_dict(best_state)
+    final_metrics = evaluate(model, Z_test, mut_test, aa_test, args.batch_size, device)
 
     os.makedirs(os.path.dirname(args.output_prefix), exist_ok=True)
 
     result = {
         "latent_npz": args.latent_npz,
         "latent_dim": args.latent_dim,
+        "hidden_dim": args.hidden_dim,
+        "wt_seq": wt,
         "wt_length": len(wt),
         "train_size": int(len(Z_train)),
         "test_size": int(len(Z_test)),
-        "metrics": metrics,
+        "metrics": final_metrics,
         "history": history,
     }
 
-    with open(args.output_prefix + ".json", "w") as f:
+    json_path = args.output_prefix + ".json"
+    pt_path = args.output_prefix + ".pt"
+
+    with open(json_path, "w") as f:
         json.dump(result, f, indent=2)
 
-    print(result["metrics"])
+    torch.save(
+        {
+            "decoder_state_dict": model.state_dict(),
+            "wt_seq": wt,
+            "seq_len": len(wt),
+            "config": {
+                "latent_dim": args.latent_dim,
+                "hidden_dim": args.hidden_dim,
+            },
+            "metrics": final_metrics,
+            "latent_npz": args.latent_npz,
+        },
+        pt_path,
+    )
+
+    print(f"Saved decoder metrics to: {json_path}")
+    print(f"Saved decoder checkpoint to: {pt_path}")
+    print(final_metrics)
 
 
 if __name__ == "__main__":

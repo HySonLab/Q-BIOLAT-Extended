@@ -51,10 +51,33 @@ def run_one_seed(data_path, seed, sa_steps, random_samples, ga_generations):
     return result
 
 
+def maybe_copy_code_fields(method_result):
+    """
+    Preserve optimized codes if optimize_latent.py returns them.
+    Supports several common field names.
+    """
+    out = {}
+
+    for key in [
+        "best_code",
+        "best_x",
+        "x",
+        "code",
+        "z_bin",
+        "top_codes",
+        "candidate_codes",
+    ]:
+        if key in method_result:
+            out[key] = method_result[key]
+
+    return out
+
+
 def extract_metrics(result):
     extracted = {}
     for method in METHODS:
         m = result["methods"][method]
+
         extracted[method] = {
             "score": m["score"],
             "improvement": m["improvement"],
@@ -63,8 +86,13 @@ def extract_metrics(result):
             "nearest_neighbor_predicted_fitness": m["nearest_neighbor"]["predicted_fitness"],
             "nearest_neighbor_percentile": m["nearest_neighbor"]["true_fitness_percentile_in_train"],
         }
+
         if method == "latent_bo" and "ucb" in m:
             extracted[method]["ucb"] = m["ucb"]
+
+        # Also preserve optimized codes if available
+        extracted[method].update(maybe_copy_code_fields(m))
+
     return extracted
 
 
@@ -74,7 +102,11 @@ def summarize_across_seeds(all_results):
     for method in METHODS:
         summary[method] = {}
 
-        metric_names = list(all_results[0][method].keys())
+        metric_names = [
+            k for k in all_results[0][method].keys()
+            if k not in {"best_code", "best_x", "x", "code", "z_bin", "top_codes", "candidate_codes"}
+        ]
+
         for metric in metric_names:
             values = [run[method][metric] for run in all_results]
             summary[method][metric] = {
@@ -93,6 +125,44 @@ def rank_methods(summary, key="nearest_neighbor_true_fitness"):
         ranking.append((method, val))
     ranking.sort(key=lambda x: x[1], reverse=True)
     return ranking
+
+
+def build_decoder_codes(raw_runs):
+    """
+    Collect optimized binary codes across seeds/methods in a flat structure
+    that decode_optimized_latents.py can use later.
+
+    Returns:
+      {
+        "simulated_annealing": [[...], [...], ...],
+        "genetic_algorithm": [[...], ...],
+        ...
+      }
+    """
+    out = {method: [] for method in METHODS}
+
+    for run in raw_runs:
+        methods = run.get("methods", {})
+        for method in METHODS:
+            if method not in methods:
+                continue
+            m = methods[method]
+
+            # single best code
+            for key in ["best_code", "best_x", "x", "code", "z_bin"]:
+                if key in m:
+                    out[method].append(m[key])
+                    break
+
+            # optional multiple codes
+            for key in ["top_codes", "candidate_codes"]:
+                if key in m and isinstance(m[key], list):
+                    for code in m[key]:
+                        out[method].append(code)
+
+    # remove empty methods
+    out = {k: v for k, v in out.items() if len(v) > 0}
+    return out
 
 
 def main():
@@ -120,6 +190,7 @@ def main():
         extracted_runs.append(extract_metrics(result))
 
     summary = summarize_across_seeds(extracted_runs)
+    decoder_codes = build_decoder_codes(raw_runs)
 
     output = {
         "dataset": args.data,
@@ -131,6 +202,7 @@ def main():
         "ranking_by_improvement": rank_methods(
             summary, key="improvement"
         ),
+        "decoder_codes": decoder_codes,
         "raw_runs": raw_runs,
     }
 
@@ -147,10 +219,16 @@ def main():
         pct_mean = summary[method]["nearest_neighbor_percentile"]["mean"]
         pct_std = summary[method]["nearest_neighbor_percentile"]["std"]
 
-        print(f"{method:20s} | "
-              f"improvement = {imp_mean:.4f} ± {imp_std:.4f} | "
-              f"nn_true_fitness = {fit_mean:.4f} ± {fit_std:.4f} | "
-              f"nn_percentile = {pct_mean:.2f} ± {pct_std:.2f}")
+        print(
+            f"{method:20s} | "
+            f"improvement = {imp_mean:.4f} ± {imp_std:.4f} | "
+            f"nn_true_fitness = {fit_mean:.4f} ± {fit_std:.4f} | "
+            f"nn_percentile = {pct_mean:.2f} ± {pct_std:.2f}"
+        )
+
+    if len(decoder_codes) == 0:
+        print("\n[WARN] No optimized binary codes were found in optimize_latent.py outputs.")
+        print("       Retrieval benchmarking still works, but decoder-based evaluation will need code export.")
 
     print(f"\nSaved benchmark summary to: {args.out}")
 
