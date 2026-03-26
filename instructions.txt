@@ -1,3 +1,5 @@
+Generate embeddings and analyze landscapes
+
 Step 1: Run scripts/run_gfp_pipeline.sh to create ESM embeddings and binary projection
 
 Step 2: Run scripts/run_gfp_pca_pipeline.sh to create PCA projection
@@ -29,3 +31,18 @@ Oracle training and evaluation:
 - Run scripts/aggregate_oracle_results.sh
 - Run scripts/group_oracle_results.sh
 
+-----------------
+
+Decoder training:
+- Run scripts/train_decoder_from_projection_latents.sh
+- Run scripts/aggregate_decoder_results.sh
+
+-----------------
+
+Run all baselines:
+- Run scripts/run_multiseed_grid.sh
+
+-----------------
+
+Run decoder on the binary sequence outputed from quantum annealing / simulated annealing:
+- Run scripts/run_decoder_grid.sh
