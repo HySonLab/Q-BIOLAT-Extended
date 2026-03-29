@@ -386,15 +386,17 @@ bash scripts/aggregate_decoded_results.sh
 If you use this repository, please cite the paper.
 
 ```bibtex
-@article{hy2026qbiolat,
-  title={Q-BioLat: Binary Latent Protein Fitness Landscapes for QUBO-Based Optimization},
+@article{hy2026binary,
+  title={Binary Latent Protein Fitness Landscapes for Quantum Annealing Optimization},
   author={Hy, Truong-Son},
+  journal={arXiv preprint arXiv:2603.17247},
   year={2026}
 }
 ```
 
 ## Contact
 
-Truong-Son Hy  
-University of Alabama at Birmingham  
-thy@uab.edu
+Prof. Truong-Son Hy, Ph.D.
+Department of Computer Science & Heersink School of Medicine
+The University of Alabama at Birmingham, United States
+Email: thy@uab.edu
