@@ -403,3 +403,6 @@ Department of Computer Science & Heersink School of Medicine
 The University of Alabama at Birmingham, United States
 
 Email: thy@uab.edu
+
+## License
+This project is released under the MIT License.
