@@ -1,343 +1,400 @@
-# Q-BioLat
+# Q-BioLat: Binary Latent Protein Fitness Landscapes for QUBO-Based Optimization
 
-Source code for the BIOKDD 2026 submission:
+Official code for the paper **Q-BioLat: Binary Latent Protein Fitness Landscapes for QUBO-Based Optimization**.
 
-**Binary Latent Protein Fitness Landscapes for Quantum Annealing Optimization**
+Q-BioLat studies protein fitness optimization in compact binary latent spaces. The pipeline starts from pretrained ESM sequence embeddings, constructs binary latent representations using random projection, PCA, or learned latent models, fits an internal QUBO surrogate, and applies combinatorial optimization methods such as simulated annealing, genetic algorithms, greedy hill climbing, random search, and a lightweight latent Bayesian optimization baseline. The repository also contains scripts for oracle training, decoder training, aggregation, plotting, and LaTeX export used in the paper.
 
-![Main_Figure](Main_Figure.png)
+![Main Figure](Main_Figure.png)
 
-Q-BioLat models protein fitness landscapes in a binary latent space. Protein sequences are first embedded with a pretrained protein language model (ESM), then projected and binarized, and finally fit with a QUBO surrogate for combinatorial optimization. The paper is available here: ![Q-BIOLAT](BIOKDD_2026_Paper.pdf)
-
-## Repository layout
+## Repository structure
 
 ```text
-Q-BIOLAT-main/
-├── Q-BIOLAT.pdf                         # paper draft
-├── README.md
-├── setup.py
+Q-BIOLAT-Extended-main/
 ├── data/
-│   └── proteingym/
-│       ├── gfp.csv                      # full GFP benchmark used in the paper
-│       ├── gfp_1000.csv
-│       ├── gfp_2000.csv
-│       ├── gfp_5000.csv
-│       └── gfp_10000.csv
-├── examples/
-│   ├── download_proteingym_benchmarks.py
-│   ├── make_subset_csv.py
-│   ├── build_real_peptide_dataset_esm_dense.py
-│   ├── project_binarize_embeddings.py
-│   ├── pca_binarize_embeddings.py
-│   └── ...
-├── experiments/
-│   ├── train_surrogate.py
-│   ├── optimize_latent.py
-│   ├── benchmark_multiseed.py
-│   ├── aggregate_grid_results.py
-│   ├── render_table1_surrogate.py
-│   ├── render_table2_optimization.py
-│   ├── render_table3_representation.py
-│   ├── plot_figure1_latent_dimension.py
-│   └── ...
-├── scripts/
-│   ├── run_gfp_pipeline.sh
-│   ├── run_gfp_pca_pipeline.sh
-│   ├── run_surrogate_and_optimization.sh
-│   ├── run_multiseed_grid.sh
-│   ├── aggregate_grid_results.sh
-│   ├── table1.sh
-│   ├── table2.sh
-│   ├── table3.sh
-│   └── figure1.sh
-└── src/
-    ├── data/
-    ├── models/
-    ├── optimization/
-    └── utils/
+│   └── proteingym/              # GFP and AAV benchmark CSVs and sampled subsets
+├── examples/                    # Data preparation, subset sampling, ESM embedding, PCA/random binarization
+├── experiments/                 # Training, evaluation, optimization, aggregation, plotting, LaTeX export
+├── scripts/                     # Reproducible shell pipelines for full experiment grids
+├── src/
+│   ├── analysis/                # Landscape diagnostics and analysis utilities
+│   ├── data/                    # Dataset loading and helper functions
+│   ├── models/                  # QUBO surrogate, MLP baseline, related model code
+│   ├── optimization/            # SA, GA, RS, GHC, latent BO implementations
+│   └── utils/                   # Metrics, retrieval, and miscellaneous utilities
+├── configs/                     # Default configs for synthetic experiments
+├── Main_Figure.png              # Overview figure
+├── instructions.txt             # Internal run order notes
+└── setup.py                     # Minimal package setup
 ```
 
-## Environment setup
+In short:
 
-### 1. Create a Python environment
+- `src/` contains reusable implementations of models, optimization methods, data loaders, and utilities.
+- `experiments/` contains Python entry points for training, evaluation, aggregation, plotting, and exporting paper figures/tables.
+- `scripts/` contains shell scripts for running full grids and reproducing the main pipeline in order.
+- `examples/` contains dataset preparation code, ESM embedding generation, subset sampling, and binary latent construction.
+- `data/proteingym/` contains the full GFP and AAV CSV files together with the sampled subsets used in the paper.
 
-Python 3.9+ is recommended.
+## Installation
+
+Python 3.9 or newer is recommended.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-```
-
-### 2. Install dependencies
-
-```bash
 pip install --upgrade pip
 pip install -e .
-pip install numpy pandas matplotlib scikit-learn requests torch transformers
+pip install numpy pandas scipy scikit-learn matplotlib torch transformers xgboost requests
 ```
 
 Notes:
 
-- `torch` and `transformers` are required for generating ESM embeddings.
-- The paper experiments were run on CPU, but GPU can also be used by passing `--device cuda` to the embedding scripts.
-- If you already have a Conda environment with PyTorch installed, that is also fine.
+- `torch` and `transformers` are required for ESM embeddings.
+- `xgboost` is required for the external oracle benchmark.
+- The provided scripts use `--device cpu` by default, but you can switch to GPU for embedding extraction if desired.
 
 ## Data
 
-The repository already includes the ProteinGym GFP CSV used in the paper:
+The repository already includes the ProteinGym datasets used in the paper:
 
 ```text
 data/proteingym/gfp.csv
+data/proteingym/aav.csv
 ```
 
-If you want to redownload ProteinGym benchmark files, use:
+It also includes the sampled subsets:
+
+```text
+gfp_1000.csv, gfp_2000.csv, gfp_5000.csv, gfp_10000.csv
+aav_1000.csv, aav_2000.csv, aav_5000.csv, aav_10000.csv
+```
+
+If you want to regenerate subsets yourself, use:
 
 ```bash
-python examples/download_proteingym_benchmarks.py
+python examples/make_subset_csv.py --input-csv data/proteingym/gfp.csv --output-csv data/proteingym/gfp_1000.csv --n 1000 --seed 42
+python examples/make_subset_csv.py --input-csv data/proteingym/aav.csv --output-csv data/proteingym/aav_1000.csv --n 1000 --seed 42
 ```
 
-## Reproducing the paper results
+The full automated pipeline scripts will regenerate these subset CSVs as needed.
 
-The results in the paper are generated in five stages:
+## Reproducibility overview
 
-1. Build dense ESM embeddings and random-projection binary latents
-2. Build PCA-based binary latents
-3. Train QUBO surrogates and run optimization over the random-projection grid
-4. Run multiseed optimization
-5. Aggregate results and render tables / figures
+The main experimental flow is:
 
-### Stage 1. Build dense ESM embeddings and random-projection binary latents
+```text
+ProteinGym CSVs
+→ sampled subsets
+→ dense ESM embeddings
+→ binary latent representations (random projection / PCA / AE / VAE)
+→ external oracle + internal QUBO surrogate
+→ combinatorial optimization
+→ decoder-based sequence reconstruction and scoring
+→ aggregation, plots, and LaTeX tables/figures
+```
 
-This script:
+## 1. Generate ESM embeddings and random-projection binary latents
 
-- samples GFP subsets with sizes `1000, 2000, 5000, 10000`
-- computes dense ESM embeddings once per subset
-- creates binary latent datasets for dimensions `8, 16, 32, 64`
+Run the GFP and AAV preprocessing pipelines:
 
 ```bash
 bash scripts/run_gfp_pipeline.sh
+bash scripts/run_aav_pipeline.sh
 ```
 
-Outputs:
+These scripts:
+
+1. sample subsets of size `{1000, 2000, 5000, 10000}`;
+2. compute dense ESM embeddings with `examples/build_real_peptide_dataset_esm_dense.py`;
+3. create random-projection binary latents for dimensions `{8, 16, 32, 64}` using median binarization.
+
+Representative outputs:
 
 ```text
 artifacts/dense/gfp_<N>_dense.npz
+artifacts/dense/aav_<N>_dense.npz
 artifacts/binary/gfp_<N>_esm_binary_<D>.npz
+artifacts/binary/aav_<N>_esm_binary_<D>.npz
 ```
 
-### Stage 2. Build PCA-based binary latents
+## 2. Generate PCA binary latents
 
-This script uses the dense embeddings from Stage 1 and creates PCA-based binary latent datasets for the same grid of sample sizes and latent dimensions.
+After dense embeddings are available, build PCA-based binary latents:
 
 ```bash
 bash scripts/run_gfp_pca_pipeline.sh
+bash scripts/run_aav_pca_pipeline.sh
 ```
 
-Outputs:
+These scripts project dense embeddings to dimensions `{8, 16, 32, 64}` with PCA and then binarize using per-dimension medians.
+
+Representative outputs:
 
 ```text
 artifacts/binary_pca/gfp_<N>_pca_binary_<D>.npz
+artifacts/binary_pca/aav_<N>_pca_binary_<D>.npz
 ```
 
-### Stage 3. Train QUBO surrogates and run optimization on the random-projection grid
+## 3. Train learned latent models (AE / VAE)
 
-This script fits the QUBO surrogate and runs optimization for all random-projection datasets.
+To reproduce the learned-latent experiments in the paper, train the autoencoder and variational autoencoder grids:
 
 ```bash
-bash scripts/run_surrogate_and_optimization.sh
+bash scripts/train_latent_models_grid.sh
 ```
 
-Outputs:
+This runs AE and VAE on both GFP and AAV for all sample sizes and latent dimensions.
+
+Representative outputs:
 
 ```text
-artifacts/results/train_gfp_<N>_<D>.json
-artifacts/results/optimize_gfp_<N>_<D>.json
+artifacts/latent_models/<dataset>_<N>_<model>_<D>.pt
+artifacts/latent_models/<dataset>_<N>_<model>_<D>.json
+artifacts/latent_models/<dataset>_<N>_<model>_<D>_test_latents.npz
 ```
 
-### Stage 4. Run multiseed optimization
+## 4. Train the external sequence-level oracle
 
-#### 4a. Random-projection multiseed grid
+Train the oracle grid:
 
-This script runs 5-seed optimization benchmarks for all sample sizes and latent dimensions using the random-projection binary latents.
+```bash
+bash scripts/train_oracle_grid.sh
+```
+
+This fits three external sequence-level regressors on dense ESM embeddings:
+
+- Ridge Regression
+- XGBoost
+- Gaussian Process Regression
+
+Then aggregate and group the oracle results:
+
+```bash
+bash scripts/aggregate_oracle_results.sh
+bash scripts/group_oracle_results.sh
+```
+
+Representative outputs:
+
+```text
+artifacts/oracle/models/
+artifacts/oracle/metrics/
+artifacts/oracle/preds/
+artifacts/results/oracle_summary.csv
+artifacts/results/oracle_grouped.csv
+```
+
+## 5. Analyze QUBO landscapes
+
+Run the landscape diagnostics for both PCA and random-projection latents:
+
+```bash
+bash scripts/analyze_all_pca_landscape.sh
+bash scripts/analyze_all_random_landscape.sh
+bash scripts/group_landscape_results.sh
+bash scripts/plot_landscape_diagnostics.sh
+```
+
+These scripts compute and summarize diagnostics such as smoothness, ruggedness, and spectral metrics of the learned QUBO landscapes.
+
+Representative outputs:
+
+```text
+artifacts/results/landscape_*.json
+artifacts/results/landscape_summary.csv
+artifacts/figures/landscape/
+```
+
+## 6. Run combinatorial optimization baselines
+
+Run the multiseed benchmark across both random-projection and PCA binary latents:
 
 ```bash
 bash scripts/run_multiseed_grid.sh
 ```
 
-Outputs:
+This benchmark runs the following methods in binary latent space:
 
-```text
-artifacts/multiseed/gfp_<N>_<D>_multiseed.json
-```
+- Simulated Annealing (SA)
+- Genetic Algorithm (GA)
+- Random Search (RS)
+- Greedy Hill Climbing (GHC)
+- Latent Bayesian Optimization (LBO)
 
-#### 4b. PCA multiseed benchmark used in Table 2 and Table 3
+Each configuration is evaluated over seeds `0 1 2 3 4`.
 
-The paper’s main optimization results use the PCA-based representation with `10,000` samples and `16` latent bits. Run:
-
-```bash
-python experiments/benchmark_multiseed.py   --data artifacts/binary_pca/gfp_10000_pca_binary_16.npz   --seeds 0 1 2 3 4   --out artifacts/gfp_10000_pca_16_multiseed.json
-```
-
-If you also want the 32-bit PCA benchmark, replace `16` with `32`.
-
-### Stage 5. Aggregate results
-
-Aggregate the random-projection grid results:
+If you want the dedicated GFP PCA multiseed script used in part of the paper workflow, run:
 
 ```bash
-bash scripts/aggregate_grid_results.sh
+bash scripts/run_multiseed_grid_pca.sh
 ```
 
-Outputs:
-
-```text
-artifacts/aggregated/train_summary.csv
-artifacts/aggregated/optimization_summary.csv
-artifacts/aggregated/full_summary.csv
-artifacts/aggregated/compact_summary.csv
-```
-
-## Regenerating paper tables and figure
-
-### Table 1. Surrogate Spearman across sample sizes and latent dimensions
+Then aggregate and group optimization outputs:
 
 ```bash
-bash scripts/table1.sh
+bash scripts/aggregate_optimization_results.sh
+bash scripts/group_optimization_results.sh
 ```
 
-Output:
+Representative outputs:
 
 ```text
-artifacts/tables/table1_surrogate.tex
+artifacts/multiseed/*.json
+artifacts/results/optimization_summary.csv
+artifacts/results/optimization_grouped.csv
 ```
 
-### Table 2. Main optimization table (PCA, 10k samples, 16 latent bits)
+## 7. Merge landscape and optimization summaries
 
-Before running this, make sure you have created:
-
-```text
-artifacts/gfp_10000_pca_16_multiseed.json
-```
-
-Then run:
+To connect landscape diagnostics with optimization behavior:
 
 ```bash
-bash scripts/table2.sh
+bash scripts/merge_landscape_optimization.sh
 ```
 
-Output:
+Representative output:
 
 ```text
-artifacts/tables/table2_optimization.tex
+artifacts/results/merged_landscape_optimization.csv
 ```
 
-### Table 3. Random projection vs PCA representation comparison
+## 8. Train the decoder
 
-Before running this, make sure you have created both:
-
-```text
-artifacts/multiseed/gfp_10000_16_multiseed.json
-artifacts/gfp_10000_pca_16_multiseed.json
-```
-
-Then run:
+Train the mutation-conditioned decoder on both PCA and random-projection latents:
 
 ```bash
-bash scripts/table3.sh
+bash scripts/train_decoder_from_projection_latents.sh
+bash scripts/aggregate_decoder_results.sh
 ```
 
-Output:
-
-```text
-artifacts/tables/table3_representation.tex
-```
-
-### Figure 1. Effect of latent dimension on optimization and surrogate performance
-
-The paper uses two plots that are included as subfigures in LaTeX:
-
-- `figure1_latent_dimension_sa_nn_fitness.pdf`
-- `figure1_latent_dimension_spearman.pdf`
-
-Generate them with:
+A simpler wrapper is also available:
 
 ```bash
-python experiments/plot_figure1_latent_dimension.py   --input artifacts/aggregated/full_summary.csv   --outdir artifacts/figures
+bash scripts/train_decoder.sh
 ```
 
-Outputs:
+Representative outputs:
 
 ```text
-artifacts/figures/figure1_latent_dimension_sa_nn_fitness.pdf
-artifacts/figures/figure1_latent_dimension_spearman.pdf
+artifacts/decoder_models/*.pt
+artifacts/decoder_models/*.json
+artifacts/results/decoder_summary.csv
 ```
 
-## Minimal commands for the main paper tables
+## 9. Decode optimized latent codes and score sequences
 
-If you only want the final paper artifacts rather than the full ablation grid, the shortest reproducible path is:
+After optimization, decode and score optimized binary latent codes with the learned decoder and the trained oracle:
 
 ```bash
+bash scripts/run_decoder_grid.sh
+bash scripts/aggregate_decoded_results.sh
+```
+
+Representative outputs:
+
+```text
+artifacts/decoded_scored/*.csv
+artifacts/results/decoded_summary.csv
+```
+
+## 10. Generate paper figures and tables
+
+The repository contains scripts that aggregate results and export plots / LaTeX artifacts used in the manuscript.
+
+### Main plotting
+
+```bash
+bash scripts/plot_final_figures.sh
+bash scripts/plot_clean_figures.sh
+bash scripts/plot_oracle_results.sh
+bash scripts/plot_section56_results.sh
+bash scripts/plot_optimization_landscape_relationships.sh
+```
+
+### Table and figure export for LaTeX
+
+```bash
+bash scripts/export_oracle_table_latex.sh
+bash scripts/export_table3_latex.sh
+bash scripts/export_table3_split.sh
+bash scripts/export_table6_latex.sh
+bash scripts/export_section56_tables.sh
+bash scripts/export_main_section56_figure.sh
+bash scripts/export_appendix_figure_latex.sh
+```
+
+These scripts produce grouped CSV summaries, publication figures, and LaTeX tables for the main text and appendix.
+
+## Suggested run order
+
+If you want to follow the main workflow in order, the shortest reproducibility path is:
+
+```bash
+# embeddings + random projection
 bash scripts/run_gfp_pipeline.sh
+bash scripts/run_aav_pipeline.sh
+
+# PCA latents
 bash scripts/run_gfp_pca_pipeline.sh
-bash scripts/run_surrogate_and_optimization.sh
+bash scripts/run_aav_pca_pipeline.sh
+
+# oracle
+bash scripts/train_oracle_grid.sh
+bash scripts/aggregate_oracle_results.sh
+bash scripts/group_oracle_results.sh
+
+# latent model analysis (AE/VAE)
+bash scripts/train_latent_models_grid.sh
+
+# decoder
+bash scripts/train_decoder_from_projection_latents.sh
+bash scripts/aggregate_decoder_results.sh
+
+# landscape analysis
+bash scripts/analyze_all_pca_landscape.sh
+bash scripts/analyze_all_random_landscape.sh
+bash scripts/group_landscape_results.sh
+bash scripts/plot_landscape_diagnostics.sh
+
+# optimization
 bash scripts/run_multiseed_grid.sh
+bash scripts/aggregate_optimization_results.sh
+bash scripts/group_optimization_results.sh
 
-python experiments/benchmark_multiseed.py   --data artifacts/binary_pca/gfp_10000_pca_binary_16.npz   --seeds 0 1 2 3 4   --out artifacts/gfp_10000_pca_16_multiseed.json
+# merge + final figures
+bash scripts/merge_landscape_optimization.sh
+bash scripts/plot_final_figures.sh
 
-bash scripts/aggregate_grid_results.sh
-bash scripts/table1.sh
-bash scripts/table2.sh
-bash scripts/table3.sh
-
-python experiments/plot_figure1_latent_dimension.py   --input artifacts/aggregated/full_summary.csv   --outdir artifacts/figures
+# decode optimized latents
+bash scripts/run_decoder_grid.sh
+bash scripts/aggregate_decoded_results.sh
 ```
 
-## Individual scripts
+## Key experimental components reproduced by this repository
 
-### Train a single QUBO surrogate
-
-Example:
-
-```bash
-python experiments/train_surrogate.py   --data artifacts/binary/gfp_10000_esm_binary_32.npz   --model qubo
-```
-
-### Optimize a single latent dataset
-
-Example:
-
-```bash
-python experiments/optimize_latent.py   --data artifacts/binary/gfp_10000_esm_binary_32.npz
-```
-
-### Render a multiseed optimization table
-
-Example:
-
-```bash
-python experiments/render_multiseed_table.py   --input artifacts/gfp_10000_pca_16_multiseed.json   --outdir artifacts/tables
-```
-
-## Notes on reproducibility
-
-- Sampling uses fixed seed `42` in the provided shell scripts.
-- The multiseed optimization experiments use seeds `0 1 2 3 4`.
-- Table 1 is generated from the random-projection grid.
-- Table 2 is generated from the PCA-based multiseed benchmark with `10,000` samples and `16` latent bits.
-- Table 3 compares the random-projection multiseed benchmark against the PCA-based benchmark for the same `(N, D) = (10000, 16)` setting.
-- Figure 1 is generated from the aggregated random-projection grid and included in the paper as two subfigures.
+- ESM sequence embeddings
+- Binary representations from random projection and PCA
+- Learned latent representations from AE and VAE
+- External sequence-level fitness oracle
+- Internal QUBO surrogate
+- Combinatorial optimization with SA, GA, RS, GHC, and LBO
+- Mutation-conditioned decoder
+- Landscape diagnostics, aggregation, and paper-ready figures/tables
 
 ## Citation
 
-If you use this repository, please cite the corresponding paper:
+If you use this repository, please cite the paper.
 
 ```bibtex
-@misc{hy2026binarylatentproteinfitness,
-      title={Binary Latent Protein Fitness Landscapes for Quantum Annealing Optimization}, 
-      author={Truong-Son Hy},
-      year={2026},
-      eprint={2603.17247},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2603.17247}, 
+@article{hy2026qbiolat,
+  title={Q-BioLat: Binary Latent Protein Fitness Landscapes for QUBO-Based Optimization},
+  author={Hy, Truong-Son},
+  year={2026}
 }
 ```
+
+## Contact
+
+Truong-Son Hy  
+University of Alabama at Birmingham  
+thy@uab.edu
