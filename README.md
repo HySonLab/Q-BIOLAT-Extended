@@ -2,6 +2,9 @@
 
 Official code for the paper **Q-BioLat: Binary Latent Protein Fitness Landscapes for QUBO-Based Optimization**.
 
+* Full paper: https://arxiv.org/pdf/2603.27526
+* Short paper (for BIOKDD 2026): https://arxiv.org/pdf/2603.17247
+
 Q-BioLat studies protein fitness optimization in compact binary latent spaces. The pipeline starts from pretrained ESM sequence embeddings, constructs binary latent representations using random projection, PCA, or learned latent models, fits an internal QUBO surrogate, and applies combinatorial optimization methods such as simulated annealing, genetic algorithms, greedy hill climbing, random search, and a lightweight latent Bayesian optimization baseline. The repository also contains scripts for oracle training, decoder training, aggregation, plotting, and LaTeX export used in the paper.
 
 ![Main Figure](Main_Figure.png)
@@ -384,6 +387,18 @@ bash scripts/aggregate_decoded_results.sh
 ## Citation
 
 If you use this repository, please cite the paper.
+
+```bibtex
+@misc{hy2026qbiolatbinarylatentprotein,
+      title={Q-BIOLAT: Binary Latent Protein Fitness Landscapes for QUBO-Based Optimization}, 
+      author={Truong-Son Hy},
+      year={2026},
+      eprint={2603.27526},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2603.27526}, 
+}
+```
 
 ```bibtex
 @article{hy2026binary,
